@@ -139,6 +139,7 @@ services:
       # 0 = stock vLLM (stops can fire mid-reason). Also honors
       # VLLM_SUPPRESS_STOPS_IN_REASONING if that is set in .env.
       DSPARK_SUPPRESS_STOPS_IN_REASONING: "${DSPARK_SUPPRESS_STOPS_IN_REASONING:-${VLLM_SUPPRESS_STOPS_IN_REASONING:-1}}"
+      ENABLE_DSV4_RENDERER_THREADSAFE_PATCH: "${ENABLE_DSV4_RENDERER_THREADSAFE_PATCH:-1}"
 
     command:
       - bash
@@ -169,6 +170,7 @@ services:
         if [ "$${DSPARK_SKIP_HOTFIX:-0}" != "1" ]; then for _hf in hotfix-dsv4-mtp-buffer-50312.sh hotfix-dsv4-adaptive-topk-50004.sh hotfix-dsv4-skip-topk-49486.sh hotfix-dsv4-dense-prefill-indexer-48407.sh hotfix-dsv4-skip-empty-c128-48957.sh hotfix-dsv4-flashmla-workspace-50298.sh hotfix-dsv4-grammar-advance.sh; do if [ -f /opt/dspark-patches/$${_hf} ]; then bash /opt/dspark-patches/$${_hf} || true; fi; done; fi;
         python3 /opt/hotfix-dsv4-issue27-partial-prefill-concurrency.py; python3 /opt/hotfix-dsv4-issue43-decode-fairness-and-diag.py; python3 /opt/hotfix-dsv4-issue26-hybrid-swa-min.py; if [ "$${DSPARK_SKIP_SUPPRESS_STOPS_HOTFIX:-0}" != "1" ]; then python3 /opt/hotfix-dsv4-suppress-stops-in-reasoning.py; fi; VLLM_QUANTIZATION_ARGS="";
         if [ "$${DSPARK_ENABLE_ASSISTANT_FINAL_HOTFIX:-0}" = "1" ]; then python3 /opt/hotfix-dsv4-assistant-final-continuation.py || exit 1; fi;
+        if [ "$${ENABLE_DSV4_RENDERER_THREADSAFE_PATCH:-1}" = "1" ]; then python3 -c 'from pathlib import Path; p=Path("/usr/local/lib/python3.12/dist-packages/vllm/renderers/deepseek_v4.py"); s=p.read_text(); import_old="from vllm.tokenizers.deepseek_v4 import DeepseekV4Tokenizer\n"; import_new=import_old+"from vllm.tokenizers.hf import maybe_make_thread_pool\n"; init_old="        super().__init__(config, tokenizer)\n\n        self._apply_chat_template_async"; init_new="        super().__init__(config, tokenizer)\n        if self.tokenizer is not None:\n            maybe_make_thread_pool(\n                self.tokenizer, config.model_config.renderer_num_workers + 1\n            )\n\n        self._apply_chat_template_async"; updated=s if import_new in s else s.replace(import_old,import_new); updated=updated if init_new in updated else updated.replace(init_old,init_new); assert import_new in updated and init_new in updated; p.write_text(updated)'; fi;
         if [ "$${ENABLE_VLLM_GB10_PATCH:-0}" = "1" ]; then
           python3 -m pip install -e /opt/vllm-gb10-hybrid-nvfp4 --no-deps;
           export VLLM_PLUGINS="$${VLLM_PLUGINS:-gb10_hybrid_nvfp4}";

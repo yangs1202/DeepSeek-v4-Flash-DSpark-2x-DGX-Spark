@@ -123,3 +123,58 @@ python3 scripts/benchmark-renderer-hol.py \
 The primary assertion is that `small_during_large.ttft` remains close to
 `small_idle.ttft`; the large request's own TTFT still includes its legitimate
 chat rendering, tokenization, and prefill cost.
+
+## DeepSeek V4 long-prefill tuning (2026-08-14)
+
+`renderer_num_workers=4` exposed a tokenizer concurrency bug in the DeepSeek V4
+custom renderer. Concurrent requests failed with HTTP 500 and
+`RuntimeError: Already borrowed` while the shared fast tokenizer changed its
+truncation state. The container startup patch now wraps the tokenizer with
+vLLM's existing `maybe_make_thread_pool` helper. A 40-request C4 stress run
+completed with no HTTP 500 or `Already borrowed` errors after the patch.
+
+Use `scripts/benchmark-long-prefill.py` for cache-miss long-prefill tests. It
+creates an exact-size unique prompt and starts short requests while the long
+prefill is active. `--long-count 2` reproduces concurrent Codex-sized requests:
+
+```bash
+python3 scripts/benchmark-long-prefill.py \
+  --base-url http://127.0.0.1:8888/v1 \
+  --long-count 2 \
+  --long-output-tokens 8 \
+  --output results/dual-long-prefill-$(date +%F).json
+```
+
+The accepted serving profile remains `max_num_batched_tokens=16384` and
+`gpu_memory_utilization=0.835`. The following isolated A/B results used an
+84K-token cache-miss prompt with thinking disabled:
+
+| Profile | 84K TTFT | KV cache | C4 aggregate | C6 aggregate | Decision |
+| --- | ---: | ---: | ---: | ---: | --- |
+| 16K / 0.835 | 44.34-51.60 s | 1,541,217 tokens* | 127.29 tok/s | 157.71 tok/s | keep |
+| 18K / 0.835 | 43.08-51.43 s | 1,351,826 tokens | 117.16 tok/s | 151.71 tok/s | reject |
+| 24K / 0.850 | 55.78 s | 1,204,021 tokens | not run | not run | reject |
+
+\* KV capacity varies slightly across boots; the accepted profile has also
+reported 1,524,097 tokens. The 18K result changed average 84K TTFT by only 1.5%
+while reducing C4/C6 throughput. The 24K profile caused memory PSI avg10 to
+reach 12.43/18.62 on the two nodes and produced swap I/O during the long
+request. 24K and 32K at utilization 0.835 could not allocate enough KV cache
+for one 1,048,576-token request.
+
+Two simultaneous 84K requests on the accepted scheduler produced TTFTs of
+52.44 s and 88.21 s while three short requests remained at 0.29 s median TTFT.
+This image rejects `max_num_partial_prefills > 1` before model loading with
+`NotImplementedError: Concurrent Partial Prefill is not supported`, so the
+scheduler defaults remain `1/1/0`.
+
+Relevant raw outputs:
+
+- `results/tune-baseline-fixed-output-2026-08-14.json`
+- `results/long-prefill-baseline-safe-renderer-2026-08-14-r1.json`
+- `results/long-prefill-baseline-safe-renderer-2026-08-14-r2.json`
+- `results/long-prefill-batch18k-util0835-2026-08-14-r1.json`
+- `results/long-prefill-batch18k-util0835-2026-08-14-r2.json`
+- `results/tune-batch18k-util0835-fixed-output-2026-08-14.json`
+- `results/long-prefill-batch24k-util085-2026-08-14-r1.json`
+- `results/dual-long-prefill-sched1-2026-08-14.json`
