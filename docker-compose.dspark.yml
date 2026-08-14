@@ -207,6 +207,7 @@ services:
         --enable-chunked-prefill
         --speculative-config "$${SPECULATIVE_CONFIG}"
         --tokenizer-mode deepseek_v4
+        --renderer-num-workers ${RENDERER_NUM_WORKERS:-4}
         --distributed-executor-backend mp
         --moe-backend flashinfer_b12x
         --tool-call-parser deepseek_v4
