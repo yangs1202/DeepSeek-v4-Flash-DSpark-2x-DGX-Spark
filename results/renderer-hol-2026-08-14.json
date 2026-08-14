@@ -1,0 +1,27 @@
+{
+  "large_body_bytes": 1058102,
+  "message_count": 591,
+  "results": {
+    "small_during_large": {
+      "label": "small_during_large",
+      "ttft": 0.10734783099997003,
+      "elapsed": 0.23047611200036044,
+      "prompt_tokens": 8,
+      "cached_tokens": 0
+    },
+    "large": {
+      "label": "large",
+      "ttft": 0.6596097089995965,
+      "elapsed": 0.6853789639999377,
+      "prompt_tokens": 11808,
+      "cached_tokens": 11520
+    },
+    "small_idle": {
+      "label": "small_idle",
+      "ttft": 0.16230672899928322,
+      "elapsed": 0.2818982999997388,
+      "prompt_tokens": 8,
+      "cached_tokens": 0
+    }
+  }
+}
