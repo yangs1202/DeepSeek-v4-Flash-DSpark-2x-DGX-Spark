@@ -170,6 +170,13 @@ if grep -q 'exit 3' start-deepseek-v4-flash-dspark.sh \
 else
   bad "start missing already-running exit 3 (#72)"
 fi
+if grep -q 'DSPARK_STARTUP_WARMUP' start-deepseek-v4-flash-dspark.sh \
+  && grep -q 'DSPARK_STARTUP_WARMUP_CONCURRENCY' start-deepseek-v4-flash-dspark.sh \
+  && grep -q 'scripts/benchmark-fixed-output.py' start-deepseek-v4-flash-dspark.sh; then
+  ok "start runs fixed-output warmup before readiness"
+else
+  bad "start missing fixed-output warmup before readiness"
+fi
 
 # Mounted hotfix files must exist.
 for p in \

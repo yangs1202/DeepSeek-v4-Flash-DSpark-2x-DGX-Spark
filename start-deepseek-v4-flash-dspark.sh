@@ -720,6 +720,29 @@ for _ in $(seq 1 "$WAIT_ATTEMPTS"); do
       -H "Content-Type: application/json" \
       -d '{"model":"'"${SERVED_MODEL_NAME:-deepseek-v4-flash-dspark}"'","messages":[{"role":"user","content":"Reply with OK."}],"max_tokens":32,"temperature":0.6,"top_p":0.95,"thinking_token_budget":1,"chat_template_kwargs":{"thinking":true,"reasoning_effort":"low"}}' >/dev/null
     echo "Minimal thinking-budget chat request succeeded."
+    if [ "${DSPARK_STARTUP_WARMUP:-1}" = "1" ]; then
+      warmup_output="$(mktemp "${TMPDIR:-/tmp}/dspark-startup-fixed-warmup.XXXXXX")"
+      warmup_log="${warmup_output}.log"
+      echo "Running fixed-output startup warmup (prompt=${DSPARK_STARTUP_WARMUP_PROMPT_TOKENS:-256}, max_tokens=${DSPARK_STARTUP_WARMUP_MAX_TOKENS:-512}, concurrency=${DSPARK_STARTUP_WARMUP_CONCURRENCY:-1})..."
+      if python3 "$SCRIPT_DIR/scripts/benchmark-fixed-output.py" \
+        --base-url "http://$URL_HOST:$VLLM_PORT/v1" \
+        --model "${SERVED_MODEL_NAME:-deepseek-v4-flash-dspark}" \
+        --prompt-tokens "${DSPARK_STARTUP_WARMUP_PROMPT_TOKENS:-256}" \
+        --max-tokens "${DSPARK_STARTUP_WARMUP_MAX_TOKENS:-512}" \
+        --concurrency "${DSPARK_STARTUP_WARMUP_CONCURRENCY:-1}" \
+        --c1-repeats 1 \
+        --output "$warmup_output" >"$warmup_log" 2>&1; then
+        rm -f "$warmup_output" "$warmup_log"
+        echo "Fixed-output startup warmup succeeded."
+      else
+        echo "Fixed-output startup warmup failed; refusing readiness." >&2
+        cat "$warmup_log" >&2 || true
+        rm -f "$warmup_output" "$warmup_log"
+        exit 1
+      fi
+    else
+      echo "Skipping fixed-output startup warmup (DSPARK_STARTUP_WARMUP=${DSPARK_STARTUP_WARMUP:-0})."
+    fi
     exit 0
   fi
   wait_with_startup_logs
