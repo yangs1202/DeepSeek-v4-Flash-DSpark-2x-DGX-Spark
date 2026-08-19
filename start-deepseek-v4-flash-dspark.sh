@@ -723,13 +723,13 @@ for _ in $(seq 1 "$WAIT_ATTEMPTS"); do
     if [ "${DSPARK_STARTUP_WARMUP:-1}" = "1" ]; then
       warmup_output="$(mktemp "${TMPDIR:-/tmp}/dspark-startup-fixed-warmup.XXXXXX")"
       warmup_log="${warmup_output}.log"
-      echo "Running fixed-output startup warmup (prompt=${DSPARK_STARTUP_WARMUP_PROMPT_TOKENS:-256}, max_tokens=${DSPARK_STARTUP_WARMUP_MAX_TOKENS:-512}, concurrency=${DSPARK_STARTUP_WARMUP_CONCURRENCY:-1})..."
+      echo "Running fixed-output startup warmup (prompt=${DSPARK_STARTUP_WARMUP_PROMPT_TOKENS:-256}, max_tokens=${DSPARK_STARTUP_WARMUP_MAX_TOKENS:-512}, concurrency=${DSPARK_STARTUP_WARMUP_CONCURRENCY:-1,2})..."
       if python3 "$SCRIPT_DIR/scripts/benchmark-fixed-output.py" \
         --base-url "http://$URL_HOST:$VLLM_PORT/v1" \
         --model "${SERVED_MODEL_NAME:-deepseek-v4-flash-dspark}" \
         --prompt-tokens "${DSPARK_STARTUP_WARMUP_PROMPT_TOKENS:-256}" \
         --max-tokens "${DSPARK_STARTUP_WARMUP_MAX_TOKENS:-512}" \
-        --concurrency "${DSPARK_STARTUP_WARMUP_CONCURRENCY:-1}" \
+        --concurrency "${DSPARK_STARTUP_WARMUP_CONCURRENCY:-1,2}" \
         --c1-repeats 1 \
         --output "$warmup_output" >"$warmup_log" 2>&1; then
         rm -f "$warmup_output" "$warmup_log"

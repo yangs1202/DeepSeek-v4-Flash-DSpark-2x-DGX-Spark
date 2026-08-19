@@ -62,7 +62,7 @@ PY
 | `VLLM_B12X_W4A16_FORCE_TILE_CONFIG` | Experimental W4A16 selector |
 | `VLLM_HOST_IP` | Distributed bind address |
 | `VLLM_PREFIX_CACHE_RETENTION_INTERVAL` | Issue #26: sparsify SWA prefix-cache checkpoints (default 4096). This is the warm-hit fix; the coordinator must still let SWA shrink the common hit (hotfix v2, issue #36). |
-| `DSPARK_STARTUP_WARMUP` / `DSPARK_STARTUP_WARMUP_*` | Readiness warmup for the production-shaped `thinking=false` 256-token/512-output request (default on, concurrency 1); prevents first-request JIT latency. Set `DSPARK_STARTUP_WARMUP=0` only for cold-start measurements. |
+| `DSPARK_STARTUP_WARMUP` / `DSPARK_STARTUP_WARMUP_*` | Readiness warmup for production-shaped `thinking=false` 256-token/512-output requests (default on, concurrency `1,2`); prevents first-request and first-2-way decode-shape JIT latency. Set `DSPARK_STARTUP_WARMUP=0` only for cold-start measurements. |
 | `VLLM_CACHE_ROOT` | vLLM cache root (compose sets path) |
 | `CUTE_DSL_ARCH` | **Not** `VLLM_*` — CuTeDSL/b12x compile target (`sm_121a` on GB10) |
 | `TORCH_CUDA_ARCH_LIST` / `FLASHINFER_CUDA_ARCH_LIST` | Build/JIT arch lists |

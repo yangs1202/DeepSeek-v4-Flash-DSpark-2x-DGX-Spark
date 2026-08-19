@@ -172,6 +172,7 @@ else
 fi
 if grep -q 'DSPARK_STARTUP_WARMUP' start-deepseek-v4-flash-dspark.sh \
   && grep -q 'DSPARK_STARTUP_WARMUP_CONCURRENCY' start-deepseek-v4-flash-dspark.sh \
+  && grep -q 'DSPARK_STARTUP_WARMUP_CONCURRENCY:-1,2' start-deepseek-v4-flash-dspark.sh \
   && grep -q 'scripts/benchmark-fixed-output.py' start-deepseek-v4-flash-dspark.sh; then
   ok "start runs fixed-output warmup before readiness"
 else
