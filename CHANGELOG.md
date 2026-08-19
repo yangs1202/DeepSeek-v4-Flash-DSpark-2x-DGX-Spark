@@ -1,8 +1,14 @@
 ## 2026-08-19
 
+### Changed
+
+- **#27 hotfix: allow 2 overlapping chunked prefills via `DSPARK_MAX_INFLIGHT_PREFILLS` (default 2).** Anemll `0.1.1` still rejects `--max-num-partial-prefills` (issue #45). The shipped #27 gate therefore read `SchedulerConfig.max_num_partial_prefills` (always 1) and serialized every long prefill — 32K×c4 decode sat on the ~8 tok/s floor. The hotfix now honors `DSPARK_MAX_INFLIGHT_PREFILLS` (clamped 1–3) from compose. Live A/B on this 2× Spark stack (`thinking=false`, `LONG_PREFILL_TOKEN_THRESHOLD=1024`, #43 floor on): 32K×c4 per-stream decode **8.2 → 24.6 tok/s**; 256×c6 aggregate unchanged (~175); 12 min 32K×c2 soak 21/21 pass; preemptions 0. Set `1` to restore the old serial gate. Does not implement real Concurrent Partial Prefill.
+
 ### Fixed
 
 - **RULER-lite never reached its advertised context lengths ([Issue #81](https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark/issues/81))**: `pad_to_length` appended one haystack sentence per loop with `guard < 200`, so every cell capped at ~4.8k tokens while still exiting 0. It now bulk-pads and `run_case` fails if `/tokenize` is under 97% of the target.
+
+- **RULER-lite scored its own client timeout as a model FAIL past ~790k tokens ([PR #85](https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark/pull/85))**: `request_json` pinned `timeout=900`, but the recorded 899,994-token acceptance run needs 1,028.85 s to first token at ~874.8 prefill tok/s, so 900 s only covers ~787k tokens of prefill — the client hung up mid-prefill and the case was reported as a model failure. Adds `--request-timeout` (default unchanged at 900 s; must be finite and > 0), plumbed through `scripts/run-audit.sh` so a raised `--lengths` can be paired with it. Only the timeout half of PR #85 was taken: its `pad_to_length` rewrite duplicated `8997d41`, cost an extra `/tokenize` round trip at every depth, and dropped the `haystack_reps` test seam.
 
 ## 2026-08-18
 
