@@ -48,7 +48,7 @@ working, and the same image + HF cache on both.
    ```
 
    Leave serving knobs at the defaults unless you mean to change them.
-   Meaningful on/off flags (`ABLITERATED`, thinking, vision, hotfixes) are
+   Meaningful on/off flags (thinking, vision, hotfixes) are
    listed under [.env.dspark switches](#envdspark-switches).
 
 2. **Image on both nodes**
@@ -66,9 +66,8 @@ working, and the same image + HF cache on both.
    ./prepare-dspark-model-cache.sh --official
    ```
 
-   Use `--abliterated` or `--yes` (reads `ABLITERATED` from `.env.dspark`).
-   Prepare forces HF online even if `HF_HUB_OFFLINE=1`, then you can serve
-   offline. After the cache is complete, keep `HF_HUB_OFFLINE=1` so a hub
+   Use `--yes` (reads model vars from `.env.dspark`). Prepare forces HF
+   online even if `HF_HUB_OFFLINE=1`, then you can serve offline. After the cache is complete, keep `HF_HUB_OFFLINE=1` so a hub
    retry cannot fill the worker disk.
 
 4. **Optional CPU gates** (no GPU; will not measure tok/s)
@@ -117,7 +116,7 @@ hosts or it can kill vLLM under deep-context load.
 | Knob | Default |
 | --- | --- |
 | Image | `ghcr.io/anemll/dspark-vllm-gx10:0.1.1` |
-| Checkpoint | official 0731 @ `9e165c30e2704aec5d9d593cce3eebd58bbef1cb` (`ABLITERATED=0`) |
+| Checkpoint | official 0731 @ `9e165c30e2704aec5d9d593cce3eebd58bbef1cb` |
 | Served name | `deepseek-v4-flash-0731` |
 | Context ceiling | `MAX_MODEL_LEN=1048576` (1M) |
 | Concurrent seqs | `MAX_NUM_SEQS=6` |
@@ -159,25 +158,20 @@ cluster wiring, not product switches. Full Anemll vs Stage-C matrix:
 
 | Variable | Default | What it does |
 | --- | --- | --- |
-| **`ABLITERATED`** | `0` | **`0`** = official [`deepseek-ai/DeepSeek-V4-Flash-0731`](https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731) @ `DSPARK_REVISION`. **`1`** = [Keys abliterated](https://huggingface.co/drowzeys/keys-DeepSeekV4-Flash-GA-0731-Dspark-Abliterated-32-32). Start and prepare pick the HF id from this flag. |
 | `DSPARK_REVISION` | `9e165c30e2704aec5d9d593cce3eebd58bbef1cb` | Official pin. Empty = tip of `main`. |
-| `DSPARK_REVISION_ABLITERATED` | empty | Abliterated pin. Empty = tip of that repo. |
-| `DSPARK_MODEL_OFFICIAL` / `DSPARK_MODEL_ABLITERATED` | the two HF ids above | Override only if you intentionally swap the repo id. |
 | `SERVED_MODEL_NAME` | `deepseek-v4-flash-0731` | Name clients send as `model`. |
 | `HF_HUB_OFFLINE` | `1` | `1` after both caches are warm (avoids filling the worker disk). Prepare forces online for the download. |
 
-Flip `ABLITERATED` like this:
+Update the pin like this:
 
 ```bash
 # in .env.dspark
-ABLITERATED=1
+DSPARK_REVISION=<commit>
 
-./prepare-dspark-model-cache.sh --yes    # or --abliterated / --official
+./prepare-dspark-model-cache.sh --yes
 ./stop-deepseek-v4-flash-dspark.sh
 ./start-deepseek-v4-flash-dspark.sh
 ```
-
-`--official` writes `ABLITERATED=0`; `--abliterated` writes `1`.
 
 ### Thinking, API, vision
 
@@ -190,9 +184,10 @@ ABLITERATED=1
 | `PREPARE_VL_SIDECAR_MODEL` | `0` | `1` = prepare also downloads VL weights. |
 | `INSTALL_VISION_MCP` | on when VL is on | `0` = sidecar only, skip harness MCP install. |
 
-An explicit `thinking_token_budget` is supported (opt-in per request). Omit
-the field to keep the stock V2 sampler fast path; `DEFAULT_THINKING=max` still
-needs a generous `max_tokens` or a budget or thinking won't end. See
+An explicit `thinking_token_budget` is **off unless you set
+`DSPARK_ENABLE_ISSUE31_GPU_HOTFIX=1`** (then opt-in per request). Default
+stock V2 rejects the field (HTTP 400). `DEFAULT_THINKING=max` still needs a
+generous `max_tokens` or that budget hotfix, or thinking won't end. See
 [Thinking-token budgets](#thinking-token-budgets).
 
 ### Serve shape (not on/off, but the knobs that change the lane)
@@ -219,6 +214,7 @@ needs a generous `max_tokens` or a budget or thinking won't end. See
 | `DSPARK_SKIP_HOTFIX` | `0` | `1` = skip the six v0.27 perf backports only (#22 still applies). |
 | `DSPARK_SKIP_SPIN_WAIT_HOTFIX` | `0` | `1` = leave vLLM shm `busy_loop_s=1s` (issue **#79** P-core spin on TP=2). |
 | `DSPARK_ISSUE43_SCHED_DIAG` | `0` | `1` = one scheduler line per step in the vLLM log (mixed prefill/decode). |
+| `DSPARK_ENABLE_ISSUE31_GPU_HOTFIX` | `0` | `1` = apply GPU `thinking_token_budget` at boot (fail-closed). Default stock V2; omit-field clients do not need this ([Issue #66](https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark/issues/66)). |
 | `ENABLE_VLLM_GB10_PATCH` | `0` | `1` = experimental hybrid NVFP4 plugin (`--quantization modelopt_gb10_hybrid`). |
 
 Issue **#21 / #26 / #27 / #43** Python hotfixes always run at container start
@@ -270,10 +266,11 @@ Capture: [docs/benchmarks.png](docs/benchmarks.png).
 ## Thinking and `max_tokens`
 
 > [!IMPORTANT]
-> The replacement #31 implementation is opt-in per request and keeps its
-> counters, request mapping, boundary enforcement, and accepted-token
-> observation on the GPU. It does not scan or copy the prefix to Python on
-> decode steps, and it does not add a budget when the field is omitted.
+> The #31 GPU budget patch is **opt-in at boot** (`DSPARK_ENABLE_ISSUE31_GPU_HOTFIX=1`)
+> and then opt-in per request. Default is stock V2: do not send
+> `thinking_token_budget`. When enabled, counters stay on the GPU; omitting the
+> field does not inject a server-side default. Leave the flag at `0` unless a
+> client actually sends the field ([Issue #66](https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark/issues/66)).
 
 `max_tokens` counts **think + answer** (reasoning + visible response + tool
 markup). With `DEFAULT_THINKING=max`, a harness cap of 256/512/800 often
@@ -282,10 +279,10 @@ whole budget — `max` ships a checkpoint-level directive ("do not stop reasonin
 until … no error remains undiscovered") and produced **~50,000 reasoning chars
 (~12.5k tokens) on a moderate prompt** in live measurement. So "size `max_tokens`
 accordingly" means **tens of thousands of tokens**, not a small bump. Raise
-`max_tokens`, set thinking `low` / `off`, or — the supported path — send an
-explicit `thinking_token_budget` (see
-[Thinking-token budgets](#thinking-token-budgets)) so reasoning is hard-capped
-and the rest of `max_tokens` is left for the visible answer.
+`max_tokens`, set thinking `low` / `off`, or — with
+`DSPARK_ENABLE_ISSUE31_GPU_HOTFIX=1` — send an explicit `thinking_token_budget`
+(see [Thinking-token budgets](#thinking-token-budgets)) so reasoning is
+hard-capped and the rest of `max_tokens` is left for the visible answer.
 
 Client `stop` strings used to fire inside `<think>`. The recipe applies
 `patches/hotfix-dsv4-suppress-stops-in-reasoning.py` so they wait for
@@ -310,9 +307,10 @@ single `</think>` at the boundary, leaving the rest of `max_tokens` available
 for the visible answer or tool call. A budget of `0` disables reasoning for
 that request. Natural `</think>` remains untouched.
 
-Send the field explicitly when a hard cap is required. Omitting it retains the
-unmodified V2 sampler fast path and `DEFAULT_THINKING` behavior. Keep
-`max_tokens` comfortably above the thinking budget so the answer has room.
+The field is HTTP 400 on stock V2. Set `DSPARK_ENABLE_ISSUE31_GPU_HOTFIX=1` and
+recreate the containers, then send it when a hard cap is required. Omitting it
+keeps `DEFAULT_THINKING` behavior. Keep `max_tokens` comfortably above the
+thinking budget so the answer has room.
 
 ```json
 {
@@ -329,9 +327,9 @@ means think ate the cap.
 
 ### Enabling the budget from a client
 
-`thinking_token_budget` is **opt-in per request** — the server injects no
-default when the field is omitted. To turn it on, send it from whatever client
-you use:
+`thinking_token_budget` needs the boot flag **and** the request field — the
+server injects no default when the field is omitted. To turn it on, set
+`DSPARK_ENABLE_ISSUE31_GPU_HOTFIX=1`, recreate, then send it from the client:
 
 **curl / any OpenAI-compatible client** — add `thinking_token_budget` to the
 request body. `0` disables reasoning for that one call; `N>0` caps reasoning at
@@ -471,7 +469,7 @@ This is the **Stage C padded NVFP4** path (584-byte sparse-MLA envelope via
 Optional GB10 hybrid plugin: `ENABLE_VLLM_GB10_PATCH=1 ./start-…`
 (`--quantization modelopt_gb10_hybrid`). Default off.
 
-CI on every push ([`.github/workflows/validate.yml`](.github/workflows/validate.yml))
+CI on every pull request and push to `main` ([`.github/workflows/validate.yml`](.github/workflows/validate.yml))
 is **CPU-only** (`scripts/ci-validate.sh`). Live tok/s still needs the 2× Spark pair.
 
 ### Strict Responses API verification
@@ -528,7 +526,6 @@ Full list: [`CREDITS.md`](CREDITS.md).
 
 **[drowzeys ("Keys")](https://github.com/drowzeys/)** — DSpark concurrency
 patch, ragged `query_start_loc`, `nvfp4_ds_mla` wiring.
-**[@u1tra_instinct](https://x.com/u1tra_instinct)** — abliterated weights.
 Also: [tonyd2wild](https://github.com/tonyd2wild/), Rafael Caricio, Fraser Price,
 [Anemll](https://github.com/Anemll/dspark-vllm-gx10), MiaAI-Lab packaging.
 

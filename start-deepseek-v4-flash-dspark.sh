@@ -237,22 +237,21 @@ resolve_rocev2_gid_index() {
   local ssh_target="$1" hca="$2" match_ip="$3"
   local hex remote
   hex="$(ipv4_to_gid_suffix "$match_ip")" || return 1
-  remote=$(
-    cat <<EOF
-hca=$(printf '%q' "$hca")
-hex=$(printf '%q' "$hex")
-for g in /sys/class/infiniband/\$hca/ports/1/gids/*; do
-  [ -e "\$g" ] || continue
-  i=\${g##*/}
-  t=\$(cat /sys/class/infiniband/\$hca/ports/1/gid_attrs/types/\$i 2>/dev/null || true)
-  [ "\$t" = "RoCE v2" ] || continue
-  case \$(cat "\$g" 2>/dev/null) in
-    *ffff:\${hex}) echo "\$i"; exit 0 ;;
-  esac
-done
-exit 1
-EOF
-  )
+  remote="$(
+    printf '%s\n' \
+      "hca=$(printf '%q' "$hca")" \
+      "hex=$(printf '%q' "$hex")" \
+      'for g in /sys/class/infiniband/$hca/ports/1/gids/*; do' \
+      '  [ -e "$g" ] || continue' \
+      '  i=${g##*/}' \
+      '  t=$(cat /sys/class/infiniband/$hca/ports/1/gid_attrs/types/$i 2>/dev/null || true)' \
+      '  [ "$t" = "RoCE v2" ] || continue' \
+      '  case $(cat "$g" 2>/dev/null) in' \
+      '    *ffff:${hex}) echo "$i"; exit 0 ;;' \
+      '  esac' \
+      'done' \
+      'exit 1'
+  )"
   if [ -z "$ssh_target" ]; then
     bash -c "$remote"
   else
@@ -430,6 +429,7 @@ print_resolved_profile() {
   echo "  gpu memory utilization: ${GPU_MEMORY_UTILIZATION:-0.80} (text default ${GPU_MEMORY_UTILIZATION_TEXT:-0.835} / vision default ${GPU_MEMORY_UTILIZATION_VISION:-0.80})"
   echo "  mtp speculative tokens: ${MTP_NUM_TOKENS:-5} (dspark_block_size min is 5)"
   echo "  default thinking: $DEFAULT_THINKING (off/low/high/max)"
+  echo "  issue31 GPU thinking_token_budget hotfix: ${DSPARK_ENABLE_ISSUE31_GPU_HOTFIX:-0} (0=stock V2 / 1=apply)"
   echo "  cudagraph capture size: $(( ${MAX_NUM_SEQS:-6} * (${MTP_NUM_TOKENS:-5} + 1) ))"
   echo "  API bind: $VLLM_HOST:$VLLM_PORT"
   echo "  API probe: $API_URL"
@@ -715,11 +715,19 @@ for _ in $(seq 1 "$WAIT_ATTEMPTS"); do
         remote_compose "docker compose -p '$PROJECT_NAME' --env-file .env.dspark -f docker-compose.vl-sidecar.yml logs --tail=80" >&2 || true
       fi
     fi
-    echo "Running minimal OpenAI-compatible thinking-budget chat request..."
-    curl -fsS --max-time 60 "${AUTH_HEADER_ARGS[@]}" "$CHAT_URL" \
-      -H "Content-Type: application/json" \
-      -d '{"model":"'"${SERVED_MODEL_NAME:-deepseek-v4-flash-dspark}"'","messages":[{"role":"user","content":"Reply with OK."}],"max_tokens":32,"temperature":0.6,"top_p":0.95,"thinking_token_budget":1,"chat_template_kwargs":{"thinking":true,"reasoning_effort":"low"}}' >/dev/null
-    echo "Minimal thinking-budget chat request succeeded."
+    if [ "${DSPARK_ENABLE_ISSUE31_GPU_HOTFIX:-0}" = "1" ]; then
+      echo "Running minimal OpenAI-compatible thinking-budget chat request..."
+      curl -fsS --max-time 60 "${AUTH_HEADER_ARGS[@]}" "$CHAT_URL" \
+        -H "Content-Type: application/json" \
+        -d '{"model":"'"${SERVED_MODEL_NAME:-deepseek-v4-flash-dspark}"'","messages":[{"role":"user","content":"Reply with OK."}],"max_tokens":32,"temperature":0.6,"top_p":0.95,"thinking_token_budget":1,"chat_template_kwargs":{"thinking":true,"reasoning_effort":"low"}}' >/dev/null
+      echo "Minimal thinking-budget chat request succeeded."
+    else
+      echo "Running minimal OpenAI-compatible chat request (stock V2; no thinking_token_budget)..."
+      curl -fsS --max-time 60 "${AUTH_HEADER_ARGS[@]}" "$CHAT_URL" \
+        -H "Content-Type: application/json" \
+        -d '{"model":"'"${SERVED_MODEL_NAME:-deepseek-v4-flash-dspark}"'","messages":[{"role":"user","content":"Reply with OK."}],"max_tokens":32,"temperature":0.6,"top_p":0.95,"chat_template_kwargs":{"thinking":true,"reasoning_effort":"low"}}' >/dev/null
+      echo "Minimal chat request succeeded."
+    fi
     if [ "${DSPARK_STARTUP_WARMUP:-1}" = "1" ]; then
       warmup_output="$(mktemp "${TMPDIR:-/tmp}/dspark-startup-fixed-warmup.XXXXXX")"
       warmup_log="${warmup_output}.log"
