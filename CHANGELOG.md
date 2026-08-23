@@ -1,3 +1,13 @@
+## 2026-08-22
+
+### Changed
+
+- **Default-on Python source hotfixes now fail closed before `vllm serve` ([Issue #107](https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark/issues/107))**: the encoding copy/reasoning-map rewrite and Issue #21, #55, #27, #43, #26, and suppress-stops patchers were separated by bare semicolons, so a missing file, anchor drift, assertion, or self-check failure could be masked by a later successful command and startup continued with stale runtime code. Every enabled step now propagates failure explicitly with `|| exit 1`, and Issue #21 anchor drift plus a missing suppress-stops target now return nonzero; the existing missing-encoding warning and all enable/skip switches retain their prior behavior. CPU failure injection covers every step, ordering, optional Issue #31, and the suppress-stops skip path.
+
+### Fixed
+
+- **Encoder-only EC producer steps no longer emit phantom token ID 0 or loop after encoding ([Issue #109](https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark/issues/109))**: `make_empty_encoder_model_runner_output` now returns one distinct empty token row per scheduled request, so the scheduler cannot append token 0, advance grammar/stop state, count fake output, or distort speculative-decoding accounting when the encoder producer sampled nothing. The paired scheduler branch stops an encoder-only request once all prompt tokens are consumed, avoiding an empty-output loop. Both source overlays implement the paired semantics from [vLLM upstream commit `7ca49fb`](https://github.com/vllm-project/vllm/commit/7ca49fbe4bab019e55d57cdc4b7fd3d55c67c1a6); one fail-closed, idempotent startup patch applies both corrections to pinned image `ghcr.io/anemll/dspark-vllm-gx10:0.1.1` and is synchronized to the worker.
+
 ## 2026-08-21
 
 ### Added
@@ -9,6 +19,8 @@
 - **Shell hotfix boot is now fail-closed, and all seven multi-hunk DSV4 backports apply transactionally**: the enabled issue22, spin-wait, and seven-script DSV4 hotfix train now aborts before `vllm serve` when a script is missing or exits nonzero; the existing `DSPARK_SKIP_ISSUE22_HOTFIX`, `DSPARK_SKIP_SPIN_WAIT_HOTFIX`, and `DSPARK_SKIP_HOTFIX` escape hatches are unchanged. Each multi-hunk script validates every target and anchor before writing, publishes through same-directory atomic renames, preserves file modes, verifies committed bytes, and restores every published target on commit or verification failure. The CPU regression suite covers all 35 hunks, idempotence, injected commit/rollback/interrupt failures, and real Compose exec blocking.
 
 ### Fixed
+
+- **Malformed `DSPARK_MAX_INFLIGHT_PREFILLS` no longer crashes scheduler admission after startup ([Issue #105](https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark/issues/105))**: the #27 hotfix previously converted the environment value with bare `int(...)` inside every waiting-admission iteration, so values such as `two`, `2.0`, `1x`, or whitespace raised `ValueError` only after traffic reached the waiting queue. Scheduler construction now parses and caches the cap once. Blank, nonpositive, or malformed values use `SchedulerConfig.max_num_partial_prefills`; malformed values emit one warning; values above 3 retain the existing clamp. The scheduling hot loop no longer reads process environment.
 
 - **Start normalizes BOM/CRLF env files and atomically publishes the worker copy ([PR #98](https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark/pull/98), reported and initially implemented by [@hecisaza](https://github.com/hecisaza))**: the operator file stays byte-identical while one private `0600` snapshot feeds the head, Compose, and worker. Worker credentials are staged privately and renamed atomically, so a failed transfer cannot expose or truncate the previous env file. The resolved-profile banner now reports the actual `MAX_NUM_SEQS=6` default.
 
